@@ -34,7 +34,7 @@ async function join() {
   joinBtn.disabled = true;
   errorEl.hidden = true;
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localStream = await getLocalMedia();
   } catch (err) {
     errorEl.textContent = `Could not access camera or microphone: ${err.message}`;
     errorEl.hidden = false;
@@ -42,7 +42,12 @@ async function join() {
     return;
   }
 
-  addTile("local", localStream, "You");
+  const hasAudio = localStream.getAudioTracks().length > 0;
+  const hasVideo = localStream.getVideoTracks().length > 0;
+  micBtn.disabled = !hasAudio;
+  camBtn.disabled = !hasVideo;
+  const missing = [!hasVideo && "no camera", !hasAudio && "no microphone"].filter(Boolean);
+  addTile("local", localStream, missing.length ? `You (${missing.join(", ")})` : "You");
   lobby.hidden = true;
   room.hidden = false;
 
@@ -58,6 +63,29 @@ async function join() {
   events.addEventListener("welcome", handle(onWelcome));
   events.addEventListener("signal", handle(onSignal));
   events.addEventListener("leave", handle(({ id }) => removePeer(id)));
+}
+
+// Asks only for the devices this machine has, since requesting a missing one
+// fails the whole request. Someone with neither can still watch and listen.
+async function getLocalMedia() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const kinds = ["audio", "video"].filter((kind) => devices.some((d) => d.kind === `${kind}input`));
+  if (kinds.length === 0) return new MediaStream();
+
+  try {
+    return await navigator.mediaDevices.getUserMedia(Object.fromEntries(kinds.map((k) => [k, true])));
+  } catch (err) {
+    if (err.name !== "NotFoundError") throw err;
+  }
+  // A listed device is not always usable; fall back to whichever one works.
+  for (const kind of kinds) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({ [kind]: true });
+    } catch (err) {
+      if (err.name !== "NotFoundError") throw err;
+    }
+  }
+  return new MediaStream();
 }
 
 function leave() {
@@ -82,7 +110,7 @@ async function onWelcome({ id, peers: others }) {
   for (const peerId of [...peers.keys()]) removePeer(peerId);
   myId = id;
   for (const peerId of others) {
-    const pc = createPeer(peerId);
+    const pc = createPeer(peerId, true);
     await pc.setLocalDescription();
     send(peerId, "description", pc.localDescription);
   }
@@ -91,7 +119,7 @@ async function onWelcome({ id, peers: others }) {
 async function onSignal({ from, type, data }) {
   let pc = peers.get(from);
   if (type === "description") {
-    if (!pc) pc = createPeer(from);
+    if (!pc) pc = createPeer(from, false);
     await pc.setRemoteDescription(data);
     if (data.type === "offer") {
       await pc.setLocalDescription();
@@ -102,14 +130,28 @@ async function onSignal({ from, type, data }) {
   }
 }
 
-function createPeer(id) {
+function createPeer(id, initiator) {
   const pc = new RTCPeerConnection(rtcConfig);
   for (const track of localStream.getTracks()) pc.addTrack(track, localStream);
+
+  // An offer only covers the kinds of media it has tracks or transceivers
+  // for. Without this, someone with no camera could never receive video.
+  if (initiator) {
+    for (const kind of ["audio", "video"]) {
+      if (!localStream.getTracks().some((t) => t.kind === kind)) {
+        pc.addTransceiver(kind, { direction: "recvonly" });
+      }
+    }
+  }
+
+  // Create the tile now so participants who send nothing still appear.
+  const label = `Guest ${id.slice(0, 4)}`;
+  addTile(id, null, label);
 
   pc.onicecandidate = ({ candidate }) => {
     if (candidate) send(id, "candidate", candidate);
   };
-  pc.ontrack = ({ streams: [stream] }) => addTile(id, stream, `Guest ${id.slice(0, 4)}`);
+  pc.ontrack = ({ streams: [stream] }) => addTile(id, stream, label);
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === "failed") removePeer(id);
   };
@@ -170,6 +212,7 @@ function toggle(button, tracks, onLabel, offLabel) {
 }
 
 function resetToggle(button, label) {
+  button.disabled = false;
   button.setAttribute("aria-pressed", "false");
   button.textContent = label;
 }
