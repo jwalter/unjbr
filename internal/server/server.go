@@ -17,6 +17,7 @@ type Server struct {
 	logger *slog.Logger
 	pages  map[string]*template.Template
 	mux    *http.ServeMux
+	room   *room
 }
 
 // New builds a Server with all routes registered.
@@ -25,6 +26,7 @@ func New(logger *slog.Logger) *Server {
 		logger: logger,
 		pages:  mustParsePages(),
 		mux:    http.NewServeMux(),
+		room:   newRoom(),
 	}
 	s.routes()
 	return s
@@ -37,6 +39,8 @@ func (s *Server) routes() {
 	}
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(static)))
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /events", s.handleEvents)
+	s.mux.HandleFunc("POST /signal", s.handleSignal)
 	s.mux.HandleFunc("GET /{$}", s.handleIndex)
 }
 
@@ -102,4 +106,9 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
 }

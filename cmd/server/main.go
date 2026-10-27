@@ -38,10 +38,21 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Browsers only allow camera access on secure origins, so serving to
+	// other machines needs TLS. localhost works without it.
+	certFile, keyFile := os.Getenv("TLS_CERT"), os.Getenv("TLS_KEY")
+
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("listening", "addr", addr)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if certFile != "" && keyFile != "" {
+			logger.Info("listening", "addr", addr, "tls", true)
+			err = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			logger.Info("listening", "addr", addr)
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 		close(errCh)

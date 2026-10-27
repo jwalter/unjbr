@@ -1,4 +1,19 @@
 {{define "content"}}
-<h1>{{.Title}}</h1>
-<p>Your Go web server is running.</p>
+<section id="lobby" class="lobby">
+  <h1>{{.Title}}</h1>
+  <p>One meeting, open to anyone with the link.</p>
+  <button id="join" type="button">Join meeting</button>
+  <p id="error" class="error" role="alert" hidden></p>
+</section>
+
+<section id="room" class="room" hidden>
+  <div id="grid" class="grid"></div>
+  <div class="controls">
+    <button id="mic" type="button" aria-pressed="false">Mute</button>
+    <button id="cam" type="button" aria-pressed="false">Stop video</button>
+    <button id="leave" type="button" class="danger">Leave</button>
+  </div>
+</section>
+
+<script type="module" src="/static/app.js"></script>
 {{end}}
